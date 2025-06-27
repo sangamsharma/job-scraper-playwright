@@ -14,6 +14,7 @@ if not DATABASE_URL:
 def save_to_postgres(data):
     try:
         conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+        logger.info("Connected to database successfully")
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
