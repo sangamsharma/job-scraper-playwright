@@ -14,5 +14,5 @@ services:
     autoDeployTrigger: commit
     version: "1"
     schedules:
-      - cron: "0 0 * * *"  # Runs daily at midnight UTC (10:00 AM AEST)
+      - cron: "0 10 * * *"  # Runs daily at midnight UTC (10:00 AM AEST)
         env: production
