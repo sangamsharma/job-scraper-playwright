@@ -2,6 +2,8 @@ import os
 import psycopg2
 from playwright.sync_api import sync_playwright
 import logging
+import csv
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -11,29 +13,30 @@ if not DATABASE_URL:
     logger.error("DATABASE_URL environment variable is not set")
     raise ValueError("DATABASE_URL must be configured in environment variables")
 
-def save_to_postgres(data):
+def save_to_supabase(data):
     try:
         conn = psycopg2.connect(DATABASE_URL, sslmode="require")
         logger.info("Connected to database successfully")
         cur = conn.cursor()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS jobs (
+            CREATE TABLE IF NOT EXISTS it_jobs (
                 id SERIAL PRIMARY KEY,
                 title TEXT,
                 company TEXT,
                 location TEXT,
                 link TEXT,
-                posted_on TIMESTAMP DEFAULT NOW()
+                posted_date TEXT,
+                scraped_date TIMESTAMP DEFAULT NOW()
             );
         """)
         for job in data:
             cur.execute("""
-                INSERT INTO jobs (title, company, location, link)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO it_jobs (title, company, location, link, posted_date)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (link) DO NOTHING
-            """, (job["title"], job["company"], job["location"], job["link"]))
+            """, (job["title"], job["company"], job["location"], job["link"], job["posted_date"]))
         conn.commit()
-        logger.info(f"Successfully saved {len(data)} jobs to the database")
+        logger.info(f"Successfully saved {len(data)} IT jobs to the database")
     except psycopg2.Error as e:
         logger.error(f"Database error: {e}")
         conn.rollback()
@@ -44,39 +47,78 @@ def save_to_postgres(data):
         if 'conn' in locals():
             conn.close()
 
-def scrape_jobs():
+def export_to_csv():
+    try:
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM it_jobs ORDER BY scraped_date DESC")
+        rows = cur.fetchall()
+        columns = ["id", "title", "company", "location", "link", "posted_date", "scraped_date"]
+        with open("it_jobs.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(columns)
+            writer.writerows(rows)
+        logger.info("Exported IT jobs to it_jobs.csv")
+    except psycopg2.Error as e:
+        logger.error(f"CSV export error: {e}")
+        raise
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+def scrape_indeed_jobs():
     results = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto("https://example.com/jobs", wait_until="networkidle")
-            jobs = page.query_selector_all(".job-listing")
+            # Search for IT jobs in Australia
+            search_url = "https://au.indeed.com/jobs?q=IT&l=Australia"
+            page.goto(search_url, wait_until="networkidle", timeout=60000)
+            logger.info(f"Scraping jobs from {search_url}")
+
+            # Extract job listings
+            jobs = page.query_selector_all("div.jobsearch-SerpJobCard")
             for job in jobs:
                 try:
-                    title = job.query_selector("h2").inner_text()
-                    company = job.query_selector(".company").inner_text()
-                    location = job.query_selector(".location").inner_text()
-                    link = job.query_selector("a").get_attribute("href") or ""
+                    title_elem = job.query_selector("h2.jobTitle a")
+                    title = title_elem.inner_text() if title_elem else "N/A"
+                    company_elem = job.query_selector("span.company")
+                    company = company_elem.inner_text().strip() if company_elem else "N/A"
+                    location_elem = job.query_selector("div.companyLocation")
+                    location = location_elem.inner_text().strip() if location_elem else "N/A"
+                    link_elem = title_elem
+                    link = link_elem.get_attribute("href") if link_elem else ""
                     if link and not link.startswith("http"):
-                        link = page.url + link
-                    results.append({"title": title, "company": company, "location": location, "link": link})
+                        link = f"https://au.indeed.com{link}"
+                    posted_date_elem = job.query_selector("span.date")
+                    posted_date = posted_date_elem.inner_text().strip() if posted_date_elem else "N/A"
+                    results.append({
+                        "title": title,
+                        "company": company,
+                        "location": location,
+                        "link": link,
+                        "posted_date": posted_date
+                    })
                 except AttributeError as e:
                     logger.warning(f"Skipping incomplete job data: {e}")
+            logger.info(f"Scraped {len(results)} IT jobs")
             browser.close()
-        logger.info(f"Scraped {len(results)} jobs")
-        return results
+            return results
     except Exception as e:
         logger.error(f"Scraping error: {e}")
-        raise
+        return results
 
 if __name__ == "__main__":
     try:
-        jobs = scrape_jobs()
+        jobs = scrape_indeed_jobs()
         if jobs:
-            save_to_postgres(jobs)
+            save_to_supabase(jobs)
+            export_to_csv()
         else:
-            logger.info("No jobs found to save")
+            logger.info("No IT jobs found to save")
     except Exception as e:
         logger.error(f"Main execution failed: {e}")
         raise
