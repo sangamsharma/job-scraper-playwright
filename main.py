@@ -3,22 +3,17 @@ import psycopg2
 from playwright.sync_api import sync_playwright
 import logging
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Get DATABASE_URL from environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     logger.error("DATABASE_URL environment variable is not set")
     raise ValueError("DATABASE_URL must be configured in environment variables")
 
 def save_to_postgres(data):
-    """
-    Save job data to the PostgreSQL database using the DATABASE_URL connection string.
-    """
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
@@ -49,15 +44,12 @@ def save_to_postgres(data):
             conn.close()
 
 def scrape_jobs():
-    """
-    Scrape job listings from a website using Playwright.
-    """
     results = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto("https://www.seek.com.au/jobs", wait_until="networkidle")
+            page.goto("https://example.com/jobs", wait_until="networkidle")
             jobs = page.query_selector_all(".job-listing")
             for job in jobs:
                 try:
