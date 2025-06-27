@@ -1,4 +1,3 @@
-# Exported from Render on 2025-06-27T00:53:00Z
 services:
   - type: worker
     name: job-scraper-playwright
@@ -7,10 +6,13 @@ services:
     plan: starter
     envVars:
       - key: DATABASE_URL
-        value: postgresql://postgres.gwyoptogfjfgfjcqvcru:8Texas+schism@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres
+        value: postgresql://postgres:8Texas+schism@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres
         sync: false
     region: singapore
     dockerContext: .
     dockerfilePath: ./Dockerfile
     autoDeployTrigger: commit
     version: "1"
+    schedules:
+      - cron: "0 0 * * *"  # Runs daily at midnight UTC (10:00 AM AEST)
+        env: production
