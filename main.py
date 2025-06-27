@@ -14,12 +14,16 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL must be configured in environment variables")
 
 def save_to_supabase(data):
+    if not data:
+        logger.info("No data to save to Supabase")
+        return
     try:
-        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require", options="-c search_path=public")
         logger.info("Connected to database successfully")
         cur = conn.cursor()
+        # Explicitly create table in public schema
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS it_jobs (
+            CREATE TABLE IF NOT EXISTS public.it_jobs (
                 id SERIAL PRIMARY KEY,
                 title TEXT,
                 company TEXT,
@@ -27,18 +31,26 @@ def save_to_supabase(data):
                 link TEXT,
                 posted_date TEXT,
                 scraped_date TIMESTAMP DEFAULT NOW()
-            );
+            )
         """)
+        logger.info("Ensured it_jobs table exists in public schema")
+        inserted_count = 0
         for job in data:
-            cur.execute("""
-                INSERT INTO it_jobs (title, company, location, link, posted_date)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (link) DO NOTHING
-            """, (job["title"], job["company"], job["location"], job["link"], job["posted_date"]))
+            try:
+                cur.execute("""
+                    INSERT INTO public.it_jobs (title, company, location, link, posted_date)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (link) DO NOTHING
+                """, (job.get("title", "N/A"), job.get("company", "N/A"), 
+                      job.get("location", "N/A"), job.get("link", ""), 
+                      job.get("posted_date", "N/A")))
+                inserted_count += 1
+            except psycopg2.Error as e:
+                logger.warning(f"Failed to insert job {job.get('link', 'unknown')}: {e}")
         conn.commit()
-        logger.info(f"Successfully saved {len(data)} IT jobs to the database")
+        logger.info(f"Successfully saved {inserted_count} IT jobs to Supabase")
     except psycopg2.Error as e:
-        logger.error(f"Database error: {e}")
+        logger.error(f"Database error during batch save: {e}")
         conn.rollback()
         raise
     finally:
@@ -49,9 +61,9 @@ def save_to_supabase(data):
 
 def export_to_csv():
     try:
-        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require", options="-c search_path=public")
         cur = conn.cursor()
-        cur.execute("SELECT * FROM it_jobs ORDER BY scraped_date DESC")
+        cur.execute("SELECT * FROM public.it_jobs ORDER BY scraped_date DESC")
         rows = cur.fetchall()
         columns = ["id", "title", "company", "location", "link", "posted_date", "scraped_date"]
         with open("it_jobs.csv", "w", newline="", encoding="utf-8") as f:
@@ -74,12 +86,10 @@ def scrape_indeed_jobs():
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
-            # Search for IT jobs in Australia
             search_url = "https://au.indeed.com/jobs?q=IT&l=Australia"
             page.goto(search_url, wait_until="networkidle", timeout=60000)
             logger.info(f"Scraping jobs from {search_url}")
 
-            # Extract job listings
             jobs = page.query_selector_all("div.jobsearch-SerpJobCard")
             for job in jobs:
                 try:
