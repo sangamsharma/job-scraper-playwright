@@ -1,0 +1,16 @@
+# Exported from Render on 2025-06-27T00:53:00Z
+services:
+  - type: worker
+    name: job-scraper-playwright
+    runtime: docker
+    repo: https://github.com/sangamsharma/job-scraper-playwright
+    plan: starter
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://postgres.gwyoptogfjfgfjcqvcru:8Texas+schism@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres
+        sync: false
+    region: singapore
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    autoDeployTrigger: commit
+    version: "1"
